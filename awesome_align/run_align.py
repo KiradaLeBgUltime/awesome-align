@@ -105,12 +105,13 @@ class LineByLineTextDataset(IterableDataset):
                     break
                 line = f.readline()
 
+
+# Same as the classe above but instead of files it handles StringIO (which are technically counted as files). Made another class for better lisibility
 class LineByLineTextDatasetString(IterableDataset):
-    def __init__(self, tokenizer: PreTrainedTokenizer, file_path, string_data, offsets=None):
+    def __init__(self, tokenizer: PreTrainedTokenizer, string_data, offsets=None):
         print('Loading the dataset...')
         self.examples = []
         self.tokenizer = tokenizer
-        self.file_path = file_path
         self.string_data = string_data
         self.offsets = offsets
 
@@ -186,12 +187,13 @@ def find_offsets(filename, num_workers):
             offsets.append(f.tell())
     return offsets
 
+# Same function as above but instead of files, it uses StringIO instance
 def find_string_offsets(string_data, num_workers):
     if num_workers <= 1:
         return None
     
     f = StringIO(string_data)
-    size = len(string_data)  # ✅ Use len() for strings
+    size = len(string_data)
     chunk_size = size // num_workers
     offsets = [0]
     for i in range(1, num_workers):
@@ -214,6 +216,16 @@ def open_writer_list(filename, num_workers):
         writers.extend([tempfile.TemporaryFile(mode='w+', encoding='utf-8') for i in range(1, num_workers)])
     return writers
 
+# Same function as above but instead of files, it uses StringIO instance
+def open_writer_string(num_workers):
+    writer = StringIO('')
+    writers = [writer]
+
+    if num_workers > 1:
+        writers.extend([StringIO('') for i in range(1, num_workers)])
+
+    return writers
+
 def merge_files(writers):
     if len(writers) == 1:
         writers[0].close()
@@ -226,22 +238,38 @@ def merge_files(writers):
     writers[0].close()
     return
 
+# Same function as above but instead of files, it uses StringIO instance and returns the content since it won't create a file
+def merge_stringio(writers):
+    if len(writers) == 1:
+        result = writers[0].getvalue()
+        writers[0].close()
+        return result
+
+    for i, writer in enumerate(writers[1:], 1):
+        writer.seek(0)
+        shutil.copyfileobj(writer, writers[0])
+        writer.close()
+    
+    result = writers[0].getvalue()  
+    writers[0].close()
+    return result
 
 def word_align(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer):
-
     def collate(examples):
         worker_ids, ids_src, ids_tgt, bpe2word_map_src, bpe2word_map_tgt, sents_src, sents_tgt = zip(*examples)
         ids_src = pad_sequence(ids_src, batch_first=True, padding_value=tokenizer.pad_token_id)
         ids_tgt = pad_sequence(ids_tgt, batch_first=True, padding_value=tokenizer.pad_token_id)
         return worker_ids, ids_src, ids_tgt, bpe2word_map_src, bpe2word_map_tgt, sents_src, sents_tgt
     
-    
-    if not args.data_file:
-        offsets = find_string_offsets(args.string_data, args.num_workers)
-    
-    offsets = find_offsets(args.data_file, args.num_workers)
-    
-    dataset = LineByLineTextDataset(tokenizer, file_path=args.data_file, offsets=offsets)
+
+
+    if getattr(args, "string_data", None):
+        offsets = find_string_offsets(args.string_data, args.num_workers) # Didn't add more checks here since I added them
+        dataset = LineByLineTextDatasetString(tokenizer, string_data=args.string_data, offsets=offsets)
+    elif args.data_file:
+        offsets = find_offsets(args.data_file, args.num_workers)
+        dataset = LineByLineTextDataset(tokenizer, file_path=args.data_file, offsets=offsets)
+
     dataloader = DataLoader(
         dataset, batch_size=args.batch_size, collate_fn=collate, num_workers=args.num_workers
     )
@@ -250,7 +278,12 @@ def word_align(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer):
     model.eval()
     tqdm_iterator = trange(0, desc="Extracting")
 
-    writers = open_writer_list(args.output_file, args.num_workers) 
+    # Again, checks have been done beforehand so I didn't add more checks
+    if args.output_file:
+        writers = open_writer_list(args.output_file, args.num_workers) 
+    else:
+        writers = open_writer_string(args.num_workers) 
+
     if args.output_prob_file is not None:
         prob_writers = open_writer_list(args.output_prob_file, args.num_workers)
     if args.output_word_file is not None:
@@ -280,12 +313,18 @@ def word_align(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer):
                     word_writers[worker_id].write(' '.join(output_word_str)+'\n')
             tqdm_iterator.update(len(ids_src))
 
-    merge_files(writers)
+    
+    if getattr(args, "return_output_as_string", None):
+        results = merge_stringio(writers)
+    if args.output_file:
+        results = merge_files(writers) #Returns None
+
     if args.output_prob_file is not None:
         merge_files(prob_writers)
     if args.output_word_file is not None:
         merge_files(word_writers)
 
+    return results
 
 def main():
     parser = argparse.ArgumentParser()

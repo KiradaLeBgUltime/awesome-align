@@ -17,7 +17,7 @@ class Aligner:
                   softmax_threeshold: float = 0.001, 
                   output_prob_file: str = None, 
                   output_word_file: str = None,
-                  model_name_or_path: str = None,
+                  model_name_or_path: str = 'bert-base-multilingual-cased',
                   config_name: str = None,
                   tokenizer_name: str = None,
                   seed: int = 42,
@@ -33,7 +33,7 @@ class Aligner:
         :param float = 0.001 softmax_threeshold: idk what that is.
         :param string = None output_prob_file: MUST BE AN ABSOLUTE PATH The output probability file.
         :param string = None output_word_file: MUST BE AN ABSOLUTE PATH The output word file. 
-        :param string = None model_name_or_path: The model checkpoint for weights initialization. Leave None if you want to train a model from scratch
+        :param string = bert-base-multilingual-cased model_name_or_path: The model checkpoint for weights initialization. Leave None if you want to train a model from scratch
         :param string = None config_name: Optionnal pretrained config name or path if not the same as model_name_or_path. If both are None, initialize a new config.
         :param string = None tokenizer_name: Optional pretrained tokenizer name or path if not the same as model_name_or_path. If both are None, initialize a new tokenizer.
         :param integer = 42 seed: Random seed for initialization.
@@ -59,7 +59,7 @@ class Aligner:
             )
 
         self.config_class, self.model_class, self.tokenizer_class = BertConfig, BertForMaskedLM, BertTokenizer
-        self.config, self.model, self.tokenizer = self._setup_classes()
+        self.model, self.tokenizer = self._setup_classes()
 
         if self.args.extraction not in ['softmax', 'entmax15']:
             raise ValueError('Extraction must either be softmax or entmax15')
@@ -106,31 +106,46 @@ class Aligner:
         else:
             model = self.model_class(config=config)
 
-        return config, model, tokenizer
+        return model, tokenizer
 
-    def align(self, string_data: str = None, data_file: str = None, output_file: str = None) -> None:
+    def align(self, string_data: str = None, data_file: str = None, output_file: str = None, return_output_as_string: bool = None) -> None:
         """
-        :param REQUIRED string data_file: path to your data file. MUST BE ABSOLUTE
-        :param REQUIRED string data_file: path to your output file. MUST BE ABSOLUTE
+        :param string data_file: Path to your data file. MUST BE ABSOLUTE AND MUST EXIST.
+        :param string output_file: Path to your output file. Can be relative and doesn't need to exist.
+        :param string string_data: Your data in string instead of a file.
+        :param boolean return_output_as_string: Returns the output as a string. Note that it can't be set to true if there is an output file.
         """
         self.args.data_file = data_file
         self.args.output_file = output_file
-        self.args.string_data = string_data
+        self.args.string_data = string_data.strip()
+        self.args.return_output_as_string = return_output_as_string
+
+        self.results = None
+
+        if return_output_as_string is None:
+            self.args.return_output_as_string = False if output_file else True
 
         if string_data and data_file:
             raise ValueError('Must either have a data_file or input valid string. Can\'t proccess both.')
+
+        if output_file and return_output_as_string:
+            raise ValueError('Return_output_as_string isn\'t supported for now when data is passed as a file. ' \
+            'It only works when data is passed as a string. ' \
+            'It is planned to be added in the future.')
 
         if data_file:
             if not Path(data_file).exists():
                 raise FileNotFoundError(rf'File : {data_file} doesn\'t exist. Are you sure it\'s an absolute path ?')
             
         if output_file:
-            if not Path(output_file).exists():
-                raise FileNotFoundError(rf'File : {output_file} doesn\'t exist. Are you sure it\'s an absolute path ?')
-       
+            Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+
         try:
-            word_align(self.args, self.model, self.tokenizer)
+            self.results = word_align(self.args, self.model, self.tokenizer)
         except:
             err = traceback.format_exc()
             print(err)
             print('Readjust the number of workers to 0 in order to not make the script crash. Windows doesn\'t support more than 0 workers')
+
+        return self.results
+        

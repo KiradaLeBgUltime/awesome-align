@@ -16,16 +16,52 @@ python setup.py install
 Inputs should be *tokenized* and each line is a source language sentence and its target language translation, separated by (` ||| `). You can see some examples in the `examples` folder.
 
 ### Extracting alignments
-Using a python file : 
+
+## Using Python. 
+
+With files as input :
 
 ```py
 from awesome_align.aligner import Aligner
 
 aligner = Aligner('bert-base-multilingual-cased')
 aligner.align(data_file='path/to/data/file', output_file='/path/to/output/file')
-
 ```
 
+With a string as input :
+
+```py
+from awesome_align.aligner import Aligner
+
+string_data = """
+Es war einmal ein kleines Dorf am Fluss ||| Once upon a time there was a small village by the river
+Die Dorfbewohner lebten im Einklang mit der Natur ||| The villagers lived in harmony with nature
+Jeden Morgen ging die Sonne hinter den Hügeln auf ||| Every morning the sun rose behind the hills
+Die Kinder rannten durch die Blumenwiesen ||| The children ran through the flower fields
+"""
+
+aligner = Aligner() # Uses bert-base-multilingual-cased model as default. 
+aligner.align(string_data=string_data, output_file='/path/to/output/file')
+# Or
+results = aligner.align(string_data=string_data, return_output_as_string=True) 
+print(results)
+
+# Note : aligner can't accept both output_file and return_output_as_string. 
+aligner.align(string_data=string_data, return_output_as_string=True, output_file='/path/to/output/file') # This will throw an error
+```
+
+
+
+Output : 
+
+```bash
+'0-4 1-5 5-8 2-0 3-6 7-11 6-9 4-7
+4-4 5-5 0-0 1-1 3-3 7-6 2-2
+2-4 5-5 7-7 4-3 0-0 1-1 6-6 3-2
+4-4 5-5 0-0 1-1 3-3 5-6 2-2'
+```
+
+## Using the CLI.
 
 Here is an example of extracting word alignments from multilingual BERT:
 
