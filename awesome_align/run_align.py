@@ -23,6 +23,7 @@ import os
 import shutil
 import tempfile
 
+from io import StringIO
 import numpy as np
 import torch
 from tqdm import trange
@@ -104,6 +105,67 @@ class LineByLineTextDataset(IterableDataset):
                     break
                 line = f.readline()
 
+class LineByLineTextDatasetString(IterableDataset):
+    def __init__(self, tokenizer: PreTrainedTokenizer, file_path, string_data, offsets=None):
+        print('Loading the dataset...')
+        self.examples = []
+        self.tokenizer = tokenizer
+        self.file_path = file_path
+        self.string_data = string_data
+        self.offsets = offsets
+
+    def process_line(self, worker_id, line):
+        if len(line) == 0 or line.isspace() or not len(line.split(' ||| ')) == 2:
+            return None
+        
+        src, tgt = line.split(' ||| ')
+        if src.rstrip() == '' or tgt.rstrip() == '':
+            return None
+    
+        sent_src, sent_tgt = src.strip().split(), tgt.strip().split()
+        token_src, token_tgt = [self.tokenizer.tokenize(word) for word in sent_src], [self.tokenizer.tokenize(word) for word in sent_tgt]
+        wid_src, wid_tgt = [self.tokenizer.convert_tokens_to_ids(x) for x in token_src], [self.tokenizer.convert_tokens_to_ids(x) for x in token_tgt]
+
+        ids_src, ids_tgt = self.tokenizer.prepare_for_model(list(itertools.chain(*wid_src)), return_tensors='pt', max_length=self.tokenizer.max_len)['input_ids'], self.tokenizer.prepare_for_model(list(itertools.chain(*wid_tgt)), return_tensors='pt', max_length=self.tokenizer.max_len)['input_ids']
+        if len(ids_src[0]) == 2 or len(ids_tgt[0]) == 2:
+            return None
+
+        bpe2word_map_src = []
+        for i, word_list in enumerate(token_src):
+            bpe2word_map_src += [i for x in word_list]
+        bpe2word_map_tgt = []
+        for i, word_list in enumerate(token_tgt):
+            bpe2word_map_tgt += [i for x in word_list]
+        return (worker_id, ids_src[0], ids_tgt[0], bpe2word_map_src, bpe2word_map_tgt, sent_src, sent_tgt) 
+
+    def __iter__(self):
+        if self.offsets is not None:
+            worker_info = torch.utils.data.get_worker_info()
+            worker_id = worker_info.id
+            offset_start = self.offsets[worker_id]
+            offset_end = self.offsets[worker_id+1] if worker_id+1 < len(self.offsets) else None
+        else:
+            offset_start = 0
+            offset_end = None
+            worker_id = 0
+
+
+        f = StringIO(self.string_data)
+        f.seek(offset_start)
+        line = f.readline()
+        while line:
+            processed = self.process_line(worker_id, line)
+            if processed is None:
+                print(f'Line "{line.strip()}" (offset in bytes: {f.tell()}) is not in the correct format. Skipping...')
+                empty_tensor = torch.tensor([self.tokenizer.cls_token_id, 999, self.tokenizer.sep_token_id])
+                empty_sent = ''
+                yield (worker_id, empty_tensor, empty_tensor, [-1], [-1], empty_sent, empty_sent)
+            else:
+                yield processed
+            if offset_end is not None and f.tell() >= offset_end:
+                break
+            line = f.readline()
+
 def find_offsets(filename, num_workers):
     if num_workers <= 1:
         return None
@@ -122,6 +184,27 @@ def find_offsets(filename, num_workers):
                     pos -= 1
                     f.seek(pos)
             offsets.append(f.tell())
+    return offsets
+
+def find_string_offsets(string_data, num_workers):
+    if num_workers <= 1:
+        return None
+    
+    f = StringIO(string_data)
+    size = len(string_data)  # ✅ Use len() for strings
+    chunk_size = size // num_workers
+    offsets = [0]
+    for i in range(1, num_workers):
+        f.seek(chunk_size * i)
+        pos = f.tell()
+        while True:
+            try:
+                l = f.readline()
+                break
+            except UnicodeDecodeError:
+                pos -= 1
+                f.seek(pos)
+        offsets.append(f.tell())
     return offsets
 
 def open_writer_list(filename, num_workers):
@@ -151,8 +234,13 @@ def word_align(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer):
         ids_src = pad_sequence(ids_src, batch_first=True, padding_value=tokenizer.pad_token_id)
         ids_tgt = pad_sequence(ids_tgt, batch_first=True, padding_value=tokenizer.pad_token_id)
         return worker_ids, ids_src, ids_tgt, bpe2word_map_src, bpe2word_map_tgt, sents_src, sents_tgt
-
+    
+    
+    if not args.data_file:
+        offsets = find_string_offsets(args.string_data, args.num_workers)
+    
     offsets = find_offsets(args.data_file, args.num_workers)
+    
     dataset = LineByLineTextDataset(tokenizer, file_path=args.data_file, offsets=offsets)
     dataloader = DataLoader(
         dataset, batch_size=args.batch_size, collate_fn=collate, num_workers=args.num_workers
@@ -243,16 +331,16 @@ def main():
         type=str,
         help="Optional pretrained tokenizer name or path if not the same as model_name_or_path. If both are None, initialize a new tokenizer.",
     )
-    parser.add_argument("--seed", type=int, default=42, help="random seed for initialization")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for initialization.")
     parser.add_argument("--batch_size", default=32, type=int)
     parser.add_argument(
         "--cache_dir",
         default=None,
         type=str,
-        help="Optional directory to store the pre-trained models downloaded from s3 (instead of the default one)",
+        help="Optional directory to store the pre-trained models downloaded from s3 (instead of the default one).",
     )
-    parser.add_argument("--no_cuda", action="store_true", help="Avoid using CUDA when available")
-    parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for data loading")
+    parser.add_argument("--no_cuda", action="store_true", help="Avoid using CUDA when available.")
+    parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for data loading.")
     args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     args.device = device

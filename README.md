@@ -16,6 +16,16 @@ python setup.py install
 Inputs should be *tokenized* and each line is a source language sentence and its target language translation, separated by (` ||| `). You can see some examples in the `examples` folder.
 
 ### Extracting alignments
+Using a python file : 
+
+```py
+from awesome_align.aligner import Aligner
+
+aligner = Aligner('bert-base-multilingual-cased')
+aligner.align(data_file='path/to/data/file', output_file='/path/to/output/file')
+
+```
+
 
 Here is an example of extracting word alignments from multilingual BERT:
 
