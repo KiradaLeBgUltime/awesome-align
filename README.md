@@ -74,8 +74,9 @@ Die Kinder rannten durch die Blumenwiesen ||| The children ran through the flowe
 aligner = Aligner() # Uses bert-base-multilingual-cased model as default. 
 aligner.align(string_data=string_data, output_file='/path/to/output/file')
 # Or
-results = aligner.align(string_data=string_data, return_output_as_string=True).format_output()
-print(results)
+results = aligner.align(string_data=string_data, return_output_as_string=True)
+formatted_results = aligner.format_output()
+print(formatted_results)
 ```
 
 Output : 
