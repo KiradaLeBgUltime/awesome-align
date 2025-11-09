@@ -47,10 +47,8 @@ results = aligner.align(string_data=string_data, return_output_as_string=True)
 print(results)
 
 # Note : aligner can't accept both output_file and return_output_as_string. 
-aligner.align(string_data=string_data, return_output_as_string=True, output_file='/path/to/output/file') # This will throw an error
+# aligner.align(string_data=string_data, return_output_as_string=True, output_file='/path/to/output/file') This will throw an error
 ```
-
-
 
 Output : 
 
@@ -59,6 +57,31 @@ Output :
 4-4 5-5 0-0 1-1 3-3 7-6 2-2
 2-4 5-5 7-7 4-3 0-0 1-1 6-6 3-2
 4-4 5-5 0-0 1-1 3-3 5-6 2-2'
+```
+
+Formatting the output : 
+
+```py
+from awesome_align.aligner import Aligner
+
+string_data = """
+Es war einmal ein kleines Dorf am Fluss ||| Once upon a time there was a small village by the river
+Die Dorfbewohner lebten im Einklang mit der Natur ||| The villagers lived in harmony with nature
+Jeden Morgen ging die Sonne hinter den Hügeln auf ||| Every morning the sun rose behind the hills
+Die Kinder rannten durch die Blumenwiesen ||| The children ran through the flower fields
+"""
+
+aligner = Aligner() # Uses bert-base-multilingual-cased model as default. 
+aligner.align(string_data=string_data, output_file='/path/to/output/file')
+# Or
+results = aligner.align(string_data=string_data, return_output_as_string=True).format_output()
+print(results)
+```
+
+Output : 
+
+```bash
+[[{'src_segment': 'einmal', 'tgt_segment': 'Once'}, {'src_segment': 'Es', 'tgt_segment': 'there'}, {'src_segment': 'war', 'tgt_segment': 'was'}, {'src_segment': 'ein', 'tgt_segment': 'a'}, {'src_segment': 'kleines', 'tgt_segment': 'small'}, {'src_segment': 'Dorf', 'tgt_segment': 'village'}, {'src_segment': 'am', 'tgt_segment': 'by'}, {'src_segment': 'Fluss', 'tgt_segment': 'river'}], [{'src_segment': 'Die', 'tgt_segment': 'The'}, {'src_segment': 'Dorfbewohner', 'tgt_segment': 'villagers'}, {'src_segment': 'lebten', 'tgt_segment': 'lived'}, {'src_segment': 'im', 'tgt_segment': 'in'}, {'src_segment': 'Einklang', 'tgt_segment': 'harmony'}, {'src_segment': 'mit', 'tgt_segment': 'with'}, {'src_segment': 'Natur', 'tgt_segment': 'nature'}], [{'src_segment': 'Jeden', 'tgt_segment': 'Every'}, {'src_segment': 'Morgen', 'tgt_segment': 'morning'}, {'src_segment': 'die', 'tgt_segment': 'the'}, {'src_segment': 'Sonne', 'tgt_segment': 'sun'}, {'src_segment': 'ging', 'tgt_segment': 'rose'}, {'src_segment': 'hinter', 'tgt_segment': 'behind'}, {'src_segment': 'den', 'tgt_segment': 'the'}, {'src_segment': 'Hügeln', 'tgt_segment': 'hills'}], [{'src_segment': 'Die', 'tgt_segment': 'The'}, {'src_segment': 'Kinder', 'tgt_segment': 'children'}, {'src_segment': 'rannten', 'tgt_segment': 'ran'}, {'src_segment': 'durch', 'tgt_segment': 'through'}, {'src_segment': 'die', 'tgt_segment': 'the'}, {'src_segment': 'Blumenwiesen', 'tgt_segment': 'flower'}, {'src_segment': 'Blumenwiesen', 'tgt_segment': 'fields'}]]
 ```
 
 ## Using the CLI.

@@ -5,10 +5,12 @@ from awesome_align.configuration_bert import BertConfig
 from awesome_align.run_align import set_seed, word_align
 from pathlib import Path
 from argparse import Namespace
-import torch
-from typing import Any
+from typing import List, Tuple, Optional, Any
+from collections import defaultdict
+from io import StringIO
 import platform
 import traceback
+import torch
 
 class Aligner:
     def __init__(self,
@@ -74,6 +76,69 @@ class Aligner:
 
         set_seed(self.args)
 
+    def _load_sentences(self, data_file: Optional[str] = None, string_data: Optional[str] = None) -> Tuple[List[List[str]], List[List[str]]]:
+        src_sents = []
+        tgt_sents = []
+
+        if data_file:
+            with open(data_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        else:
+            f = StringIO(string_data)
+            lines = f.readlines()
+            f.close()
+
+        for line in lines:
+            if "|||" not in line:
+                continue
+            src, tgt = line.strip().split("|||")
+            src_sents.append(src.strip().split())
+            tgt_sents.append(tgt.strip().split())
+
+        return src_sents, tgt_sents
+
+    def _load_alignments(self, align_file: Optional[str] = None, string_output: Optional[str] = None) -> List[List[Tuple[int, int]]]:
+        all_aligns = []
+
+        if align_file:
+            with open(align_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        else:
+            f = StringIO(string_output)
+            lines = f.readlines()
+            f.close()
+
+        for line in lines:
+            pairs = []
+            for ij in line.strip().split():
+                if '-' not in ij:
+                    continue
+                i, j = ij.split('-')
+                pairs.append((int(i), int(j)))
+            all_aligns.append(pairs)
+
+        return all_aligns
+
+    def _build_segments(self, src_sents, tgt_sents, all_aligns) -> list[dict]:
+        results = []
+
+        for src_tokens, tgt_tokens, aligns in zip(src_sents, tgt_sents, all_aligns):
+            segments = defaultdict(list)
+
+            for i, j in aligns:
+                if i < len(src_tokens) and j < len(tgt_tokens):
+                    segments[j].append(src_tokens[i])
+
+            sentence_mapping = []
+            for j in sorted(segments.keys()):
+                src_segment = " ".join(segments[j])
+                tgt_segment = tgt_tokens[j]
+                sentence_mapping.append({'src_segment': src_segment, 'tgt_segment': tgt_segment})
+
+            results.append(sentence_mapping)
+
+        return results
+
     def _setup_classes(self) -> tuple[Any, Any, Any]:    
         """Configures the config, model and tokenizer based on the user's arguments."""
         # CONFIG SETUP
@@ -108,6 +173,12 @@ class Aligner:
 
         return model, tokenizer
 
+    def format_output(self):
+        src_sents, tgt_sents = self._load_sentences(data_file=self.args.data_file, string_data=self.args.string_data)
+        all_aligns = self._load_alignments(align_file=self.args.output_file, string_output=self.results)
+
+        return self._build_segments(src_sents, tgt_sents, all_aligns)
+
     def align(self, string_data: str = None, data_file: str = None, output_file: str = None, return_output_as_string: bool = None) -> None:
         """
         :param string data_file: Path to your data file. MUST BE ABSOLUTE AND MUST EXIST.
@@ -117,7 +188,7 @@ class Aligner:
         """
         self.args.data_file = data_file
         self.args.output_file = output_file
-        self.args.string_data = string_data.strip()
+        self.args.string_data = string_data.strip() if string_data else None
         self.args.return_output_as_string = return_output_as_string
 
         self.results = None
